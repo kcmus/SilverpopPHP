@@ -1,10 +1,8 @@
-# Silverpop PHP Client Library
+# Silverpop PHP Client Library (KCM edition)
 
 PHP client library for the Silverpop API.
 
-*Note*. This project is not actively maintained. I suggest if it is useful, you fork your own version of it.
-
-Pull requests that are non-breaking will be merged.
+*Note*. This project is a fork of the [original SilverpopPHP library](https://github.com/simpleweb/SilverpopPHP).
 
 ## Installation
 
@@ -13,7 +11,7 @@ Installation via [composer](http://getcomposer.org) . Create a composer.json fil
 ```javascript
 {
     "require": {
-        "simpleweb/silverpopphp": "master-dev"
+        "kcmus/silverpopphp": "master-dev"
     }
 }
 ```
