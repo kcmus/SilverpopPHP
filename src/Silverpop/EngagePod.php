@@ -20,6 +20,7 @@ class EngagePod {
     private $_jsessionid;
     private $_username;
     private $_password;
+    private $_raw_response;
 
     /**
      * Constructor
@@ -32,7 +33,6 @@ class EngagePod {
         // otherwise we are authenticating to the server once for every request
         $this->_baseUrl = 'http://api' . $config['engage_server'] . '.silverpop.com/XMLAPI';
         $this->_login($config['username'], $config['password']);
-
     }
 
     /**
@@ -887,6 +887,15 @@ class EngagePod {
     }
 
     /**
+     * Returns the raw body from the SOAP calls.
+     *
+     * @return mixed string | null
+     */
+    public function getRawResponse() {
+        return $this->_raw_response;
+    }
+
+    /**
      * Private method: authenticate with Silverpop
      *
      */
@@ -924,7 +933,7 @@ class EngagePod {
      *
      */
     private function _request($data, $replace = array(), $attribs = array()) {
-
+        $this->_raw_response = null;
         if (is_array($data))
         {
             $atx = new ArrayToXml($data, $replace, $attribs);;
@@ -944,6 +953,7 @@ class EngagePod {
         $response = $this->_httpPost($fields);
         if ($response) {
             $arr =  \Silverpop\Util\xml2array($response);
+            $this->_raw_response = $response;
             if (isset($arr["Envelope"]["Body"]["RESULT"]["SUCCESS"])) {
                 return $arr;
             } else {
