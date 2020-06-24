@@ -20,7 +20,6 @@ class EngagePod {
     private $_jsessionid;
     private $_username;
     private $_password;
-    private $_raw_response;
 
     /**
      * Constructor
@@ -31,8 +30,9 @@ class EngagePod {
 
         // It would be a good thing to cache the jsessionid somewhere and reuse it across multiple requests
         // otherwise we are authenticating to the server once for every request
-        $this->_baseUrl = 'https://api-campaign-us-' . $config['engage_server'] . '.goacoustic.com';
+        $this->_baseUrl = 'https://api-campaign-us-' . $config['engage_server'] . '.goacoustic.com/XMLAPI';
         $this->_login($config['username'], $config['password']);
+
     }
 
     /**
@@ -179,13 +179,9 @@ class EngagePod {
 
     /**
      * Remove a contact
-     * @param string $databaseID
-     * @param string $email
-     * @param mixed $sync_fields boolean false if not used or associative array of sync fields.
      *
-     * @return bool
      */
-    public function removeContact($databaseID, $email, $sync_fields=false) {
+    public function removeContact($databaseID, $email, $customer_id=false) {
         $data["Envelope"] = array(
             "Body" => array(
                 "RemoveRecipient" => array(
@@ -195,13 +191,10 @@ class EngagePod {
             ),
         );
         /*
-         * Sync fields are optional so users can target recipients that do not have the EMAIL unique key or no unique keys at all.
+         * This should be optional because not every database will have a 'customer_id' key field.
          */
-        if ( $sync_fields !== FALSE ) {
-            foreach ( $sync_fields as $key => $value ) {
-                $data['Envelope']['Body']['RemoveRecipient']['COLUMN'][] = array("NAME"=> $key , "VALUE"=> $sync_fields[$key] );
-            }
-
+        if ( $customer_id !== FALSE ) {
+            $data['Envelope']['Body']['RemoveRecipient']['COLUMN'][] = array("NAME"=>"customer_id", "VALUE"=>$customer_id);
         }
 
         $response = $this->_request($data);
@@ -887,15 +880,6 @@ class EngagePod {
     }
 
     /**
-     * Returns the raw body from the SOAP calls.
-     *
-     * @return mixed string | null
-     */
-    public function getRawResponse() {
-        return $this->_raw_response;
-    }
-
-    /**
      * Private method: authenticate with Silverpop
      *
      */
@@ -933,7 +917,7 @@ class EngagePod {
      *
      */
     private function _request($data, $replace = array(), $attribs = array()) {
-        $this->_raw_response = null;
+
         if (is_array($data))
         {
             $atx = new ArrayToXml($data, $replace, $attribs);;
@@ -953,7 +937,6 @@ class EngagePod {
         $response = $this->_httpPost($fields);
         if ($response) {
             $arr =  \Silverpop\Util\xml2array($response);
-            $this->_raw_response = $response;
             if (isset($arr["Envelope"]["Body"]["RESULT"]["SUCCESS"])) {
                 return $arr;
             } else {
