@@ -20,6 +20,7 @@ class EngagePod {
     private $_jsessionid;
     private $_username;
     private $_password;
+    private $_raw_responce;
 
     /**
      * Constructor
@@ -32,7 +33,7 @@ class EngagePod {
         // otherwise we are authenticating to the server once for every request
         $this->_baseUrl = 'https://api-campaign-us-' . $config['engage_server'] . '.goacoustic.com/XMLAPI';
         $this->_login($config['username'], $config['password']);
-
+        $this->_raw_responce = NULL;
     }
 
     /**
@@ -879,6 +880,10 @@ class EngagePod {
 
     }
 
+    public function getRawResponse() {
+
+    }
+
     /**
      * Private method: authenticate with Silverpop
      *
@@ -935,8 +940,11 @@ class EngagePod {
             "xml" => $xml,
         );
         $response = $this->_httpPost($fields);
+
         if ($response) {
+            $this->_raw_responce = $response;
             $arr =  \Silverpop\Util\xml2array($response);
+
             if (isset($arr["Envelope"]["Body"]["RESULT"]["SUCCESS"])) {
                 return $arr;
             } else {
