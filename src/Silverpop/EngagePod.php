@@ -881,7 +881,7 @@ class EngagePod {
     }
 
     public function getRawResponse() {
-
+        return $this->_raw_responce;
     }
 
     /**
@@ -922,6 +922,7 @@ class EngagePod {
      *
      */
     private function _request($data, $replace = array(), $attribs = array()) {
+        $this->_raw_responce = NULL;
 
         if (is_array($data))
         {
@@ -939,6 +940,7 @@ class EngagePod {
             "jsessionid" => isset($this->_jsessionid) ? $this->_jsessionid : '',
             "xml" => $xml,
         );
+
         $response = $this->_httpPost($fields);
 
         if ($response) {
