@@ -270,6 +270,16 @@ class EngagePod {
         }
     }
 
+    /**
+     * @param $databaseID
+     * @param null $email
+     * @param null $recipientId
+     * @param null $encodedRecipientId
+     * @param bool $returnContactLists
+     * @param null $columns
+     * @return bool|mixed
+     * @throws \Exception
+     */
     public function getContact($databaseID, $email = null, $recipientId = null, $encodedRecipientId = null , $returnContactLists = false, $columns = null)
     {
 
@@ -309,7 +319,7 @@ class EngagePod {
                 throw new \Exception('Recipient added but no recipient ID was returned from the server.');
             }
         } else {
-            throw new \Exception("AddRecipient Error: ".$this->_getErrorFromResponse($response));
+            return FALSE;
         }
     }
 
