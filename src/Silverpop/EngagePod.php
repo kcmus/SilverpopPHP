@@ -13,14 +13,22 @@ class EngagePod {
      *
      * @const string VERSION
      */
-    const VERSION = '0.0.2';
+    const VERSION = '0.0.3';
 
     private $_baseUrl;
     private $_session_encoding;
     private $_jsessionid;
     private $_username;
     private $_password;
+
+    private $_authType;
+    private $_clientId;
+    private $_clientSecret;
+    private $_refreshToken;
+
     private $_raw_responce;
+
+    private $_token;
 
     /**
      * Constructor
@@ -32,8 +40,47 @@ class EngagePod {
         // It would be a good thing to cache the jsessionid somewhere and reuse it across multiple requests
         // otherwise we are authenticating to the server once for every request
         $this->_baseUrl = 'https://api-campaign-us-' . $config['engage_server'] . '.goacoustic.com/XMLAPI';
-        $this->_login($config['username'], $config['password']);
+
         $this->_raw_responce = NULL;
+
+        $this->_authType = isset($config['auth_type']) ? $config['auth_type'] : 'basic';
+
+        if ($this->_authType  == 'oauth') {
+
+          $this->_clientId = $config['client_id'];
+          $this->_clientSecret = $config['client_secret'];
+          $this->_refreshToken = $config['refresh_token'];
+
+          $tokenFile = $_SERVER['DOCUMENT_ROOT'] . '/sp-a-token';
+
+          $token = false;
+
+          if (file_exists($tokenFile)) {
+
+            $tokenFiletime = filemtime($tokenFile); // --- File time
+
+            $now = time(); // --- Current Time
+            $tokenFileAge = round(($now - $tokenFiletime) / 60);
+
+            if ($tokenFileAge > 150) {
+              unlink($tokenFile);
+            }
+
+            $token = file_get_contents($tokenFile);
+          }
+
+          if ($token) {
+            $this->_token = $token;
+          } else {
+            $this->getToken();
+            if (strlen ($this->_token) == 46) {
+              file_put_contents($tokenFile, $this->_token);
+            }
+          }
+
+        } else {
+          $this->_login($config['username'], $config['password']);
+        }
     }
 
     /**
@@ -50,6 +97,42 @@ class EngagePod {
       $response = $this->_request($data);
       $result = $response["Envelope"]["Body"]["RESULT"];
       return $this->_isSuccess($result);
+    }
+
+  /**
+   *
+   */
+    private function getToken() {
+      $oauthTokenUrl = $this->_baseUrl . '/../oauth/token';
+
+      $fields = [];
+      $fields['grant_type'] = 'refresh_token';
+      $fields['client_id'] = $this->_clientId;
+      $fields['client_secret'] = $this->_clientSecret;
+      $fields['refresh_token'] = $this->_refreshToken;
+
+      $fields_string = http_build_query($fields);
+
+      //open connection
+      $ch = curl_init();
+      //set headers in array
+      $headers = array(
+        'Expect:',
+        'Content-Type: application/x-www-form-urlencoded; charset=utf-8',
+      );
+
+      //set the url, number of POST vars, POST data
+      curl_setopt($ch,CURLOPT_HTTPHEADER, $headers);
+      curl_setopt($ch,CURLOPT_URL,$oauthTokenUrl);
+      curl_setopt($ch,CURLOPT_POST,count($fields));
+      curl_setopt($ch,CURLOPT_POSTFIELDS,$fields_string);
+      curl_setopt($ch,CURLOPT_RETURNTRANSFER,true);
+
+      //execute post
+      $result = json_decode(curl_exec($ch),true);
+      $this->_token = isset($result['access_token']) ? $result['access_token'] : '';
+      //close connection
+      curl_close($ch);
     }
 
     /**
@@ -975,11 +1058,19 @@ class EngagePod {
         $fields_string = http_build_query($fields);
         //open connection
         $ch = curl_init();
-        //set headers in array
-        $headers = array(
-         'Expect:',
-         'Content-Type: application/x-www-form-urlencoded; charset=utf-8',
-        );
+
+        if ($this->_authType == 'oauth') {
+          $headers = [
+            'Content-Type: application/x-www-form-urlencoded; charset=utf-8',
+            'Authorization: Bearer ' . $this->_token
+          ];
+        } else {
+          $headers = [
+            'Expect:',
+            'Content-Type: application/x-www-form-urlencoded; charset=utf-8',
+          ];
+        }
+
         //set the url, number of POST vars, POST data
         curl_setopt($ch,CURLOPT_HTTPHEADER, $headers);
         curl_setopt($ch,CURLOPT_URL,$this->_getFullUrl());
