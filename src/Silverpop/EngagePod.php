@@ -81,7 +81,7 @@ class EngagePod {
             $this->_tokenStorage = 'file';
           }
 
-          if ($this->_tokenStorage == 'memcache') {
+          if ($this->_tokenStorage == 'memcached') {
             $token = $this->_memcached->get('sp_a_token');
           }
           else {
@@ -104,7 +104,6 @@ class EngagePod {
           } else {
             $this->getToken();
             if ($this->_token) {
-              $this->_token = $token;
               if ($this->_tokenStorage == 'memcached') {
                 $this->_memcached->set('sp_a_token', $this->_token, $this->_tokenTTL);
               } else {
