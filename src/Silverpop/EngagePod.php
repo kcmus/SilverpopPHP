@@ -28,15 +28,16 @@ class EngagePod {
     private $_clientSecret;
     private $_refreshToken;
 
-    private $_raw_responce;
+    private $_raw_response;
 
     /** @var string $_token */
     private $_token;
     /** @var integer $_tokenTTL */
     private $_tokenTTL;
-    /** @var string $_token */
+    /** @var string $_tokenStorage */
     private $_tokenStorage;
-
+    /** @var string $_tokenFile */
+    private $_tokenFile;
 
     /** @var \Memcached $memcached */
     private $_memcached;
@@ -69,8 +70,7 @@ class EngagePod {
           $this->_clientSecret = $config['client_secret'];
           $this->_refreshToken = $config['refresh_token'];
 
-          $token = false;
-          $tokenFile = $_SERVER['DOCUMENT_ROOT'] . '/sp_a_token';
+          $this->_tokenFile = $_SERVER['DOCUMENT_ROOT'] . '/sp_a_token';
 
           if ($this->_memcached_host) {
             $this->_memcached = new \Memcached();
@@ -81,39 +81,7 @@ class EngagePod {
             $this->_tokenStorage = 'file';
           }
 
-          if ($this->_tokenStorage == 'memcached') {
-            $token = $this->_memcached->get('sp_a_token');
-          }
-          else {
-            if (file_exists($tokenFile)) {
-              $tokenFiletime = filemtime($tokenFile);
-
-              $now = time();
-              $tokenFileAge = round(($now - $tokenFiletime) / 60);
-
-              if ($tokenFileAge > $this->_tokenTTL) {
-                unlink($tokenFile);
-              } else {
-                $token = file_get_contents($tokenFile);
-              }
-            }
-          }
-
-          if ($token) {
-            $this->_token = $token;
-          } else {
-            $this->getToken();
-            if ($this->_token) {
-              if ($this->_tokenStorage == 'memcached') {
-                $this->_memcached->set('sp_a_token', $this->_token, $this->_tokenTTL);
-              } else {
-                file_put_contents($tokenFile, $this->_token);
-              }
-            }
-            else {
-              throw new \Exception('Silverpop/Acoustic authenticate error');
-            }
-          }
+          $this->getToken();
 
         } else {
 
@@ -143,7 +111,48 @@ class EngagePod {
   /**
    * Get the Oauth token from Silverpop/Acoustic
    */
-    private function getToken() {
+  private function getToken() {
+
+    $token = false;
+    if ($this->_tokenStorage == 'memcached') {
+      $token = $this->_memcached->get('sp_a_token');
+    }
+    else {
+      if (file_exists($this->_tokenFile)) {
+        $tokenFiletime = filemtime($this->_tokenFile);
+
+        $now = time();
+        $tokenFileAge = round(($now - $tokenFiletime) / 60);
+
+        if ($tokenFileAge > $this->_tokenTTL) {
+          unlink($this->_tokenFile);
+        } else {
+          $token = file_get_contents($this->_tokenFile);
+        }
+      }
+    }
+
+    if ($token) {
+      $this->_token = $token;
+    } else {
+      $this->setToken();
+      if ($this->_token) {
+        if ($this->_tokenStorage == 'memcached') {
+          $this->_memcached->set('sp_a_token', $this->_token, time() + $this->_tokenTTL);
+        } else {
+          file_put_contents($this->_tokenFile, $this->_token);
+        }
+      }
+      else {
+        throw new \Exception('Silverpop/Acoustic authenticate error');
+      }
+    }
+  }
+
+  /**
+   * Set the Oauth token from Silverpop/Acoustic
+   */
+    private function setToken() {
 
       $fields = [];
       $fields['grant_type'] = 'refresh_token';
@@ -170,7 +179,8 @@ class EngagePod {
 
       //execute post
       $result = json_decode(curl_exec($ch),true);
-      $this->_token = isset($result['access_token']) ? $result['access_token'] : false;
+      $this->_token   = isset($result['access_token']) ? $result['access_token'] : false;
+      $this->_tokenTTL = isset($result['expires_in']) ? ($result['expires_in'] - 600) : $this->_tokenTTL; //if set, subtract 10 minutes, else keep default
       //close connection
       curl_close($ch);
     }
@@ -1128,7 +1138,28 @@ class EngagePod {
         //close connection
         curl_close($ch);
 
+        if (!$this->_isTokenExpired($result)) {
+          $this->_login();
+        }
+
         return $result;
+    }
+
+
+    /**
+     * Private method: parse an error response from Silverpop
+     *
+     */
+    private function _isTokenExpired($response) {
+
+      $tokenExpiredString = "The access token has expired.";
+
+      if (isset($response['Envelope']['Body']['Fault']['FaultString']) && !empty($response['Envelope']['Body']['Fault']['FaultString']) &&
+          $response['Envelope']['Body']['Fault']['FaultString'] == $tokenExpiredString) {
+        return true;
+      }
+
+      return false;
     }
 
     /**
