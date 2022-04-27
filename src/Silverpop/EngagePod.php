@@ -13,7 +13,7 @@ class EngagePod {
      *
      * @const string VERSION
      */
-    const VERSION = '0.0.3';
+    const VERSION = '1.1.2';
 
 
     private $_baseUrl;
@@ -38,6 +38,8 @@ class EngagePod {
     private $_tokenStorage;
     /** @var string $_tokenFile */
     private $_tokenFile;
+    /** @var bool $_tokenRetried */
+    private $_tokenRetried = false;
 
     /** @var \Memcached $memcached */
     private $_memcached;
@@ -1138,8 +1140,10 @@ class EngagePod {
         //close connection
         curl_close($ch);
 
-        if (!$this->_isTokenExpired($result)) {
-          $this->_login();
+        if (!$this->_tokenRetried && !$this->_isTokenExpired($result)) {
+          $this->_tokenRetried = true;
+          $this->getToken();
+          $this->_httpPost($fields);
         }
 
         return $result;
