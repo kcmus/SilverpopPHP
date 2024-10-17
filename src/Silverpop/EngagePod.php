@@ -13,27 +13,85 @@ class EngagePod {
      *
      * @const string VERSION
      */
-    const VERSION = '0.0.2';
+    const VERSION = '1.1.2';
+
 
     private $_baseUrl;
+    private $_xmlUrl;
     private $_session_encoding;
     private $_jsessionid;
     private $_username;
     private $_password;
-    private $_raw_responce;
+
+    private $_authType;
+    private $_clientId;
+    private $_clientSecret;
+    private $_refreshToken;
+
+    private $_raw_response;
+
+    /** @var string $_token */
+    private $_token;
+    /** @var integer $_tokenTTL */
+    private $_tokenTTL;
+    /** @var string $_tokenStorage */
+    private $_tokenStorage;
+    /** @var string $_tokenFile */
+    private $_tokenFile;
+    /** @var bool $_tokenRetried */
+    private $_tokenRetried = false;
+
+    /** @var \Memcached $memcached */
+    private $_memcached;
+    /** @var string $_memcached_host */
+    private $_memcached_host;
+    /** @var string $_memcached_port */
+    private $_memcached_port;
 
     /**
      * Constructor
      *
-     * Sets $this->_baseUrl based on the engage server specified in config
+     * Sets $this->_baseUrl based on the Engage server specified in config
      */
     public function __construct($config) {
 
+        $this->_tokenTTL = 9900; //2.75 hours
+
         // It would be a good thing to cache the jsessionid somewhere and reuse it across multiple requests
         // otherwise we are authenticating to the server once for every request
-        $this->_baseUrl = 'https://api-campaign-us-' . $config['engage_server'] . '.goacoustic.com/XMLAPI';
-        $this->_login($config['username'], $config['password']);
-        $this->_raw_responce = NULL;
+        $this->_baseUrl = 'https://api-campaign-us-' . $config['engage_server'] . '.goacoustic.com';
+        $this->_xmlUrl = $this->_baseUrl . '/XMLAPI';
+
+        $this->_authType = isset($config['auth_type']) ? $config['auth_type'] : 'basic';
+        $this->_memcached_host = isset($config['memcached_host']) ? $config['memcached_host'] : false;
+        $this->_memcached_port = isset($config['memcached_port']) ? $config['memcached_port'] : false;
+
+        if ($this->_authType  == 'oauth') {
+
+          $this->_clientId = $config['client_id'];
+          $this->_clientSecret = $config['client_secret'];
+          $this->_refreshToken = $config['refresh_token'];
+
+          $this->_tokenFile = $_SERVER['DOCUMENT_ROOT'] . '/sp_a_token';
+
+          if ($this->_memcached_host) {
+            $this->_memcached = new \Memcached();
+            $servers = [[$this->_memcached_host, $this->_memcached_port]];
+            $this->_memcached->addServers($servers);
+            $this->_tokenStorage = 'memcached';
+          } else {
+            $this->_tokenStorage = 'file';
+          }
+
+          $this->getToken();
+
+        } else {
+
+          $this->_username = $config['username'];
+          $this->_password = $config['password'];
+
+          $this->_login();
+        }
     }
 
     /**
@@ -50,6 +108,83 @@ class EngagePod {
       $response = $this->_request($data);
       $result = $response["Envelope"]["Body"]["RESULT"];
       return $this->_isSuccess($result);
+    }
+
+  /**
+   * Get the Oauth token from Silverpop/Acoustic
+   */
+  private function getToken() {
+
+    $token = false;
+    if ($this->_tokenStorage == 'memcached') {
+      $token = $this->_memcached->get('sp_a_token');
+    }
+    else {
+      if (file_exists($this->_tokenFile)) {
+        $tokenFiletime = filemtime($this->_tokenFile);
+
+        $now = time();
+        $tokenFileAge = round(($now - $tokenFiletime) / 60);
+
+        if ($tokenFileAge > $this->_tokenTTL) {
+          unlink($this->_tokenFile);
+        } else {
+          $token = file_get_contents($this->_tokenFile);
+        }
+      }
+    }
+
+    if ($token) {
+      $this->_token = $token;
+    } else {
+      $this->setToken();
+      if ($this->_token) {
+        if ($this->_tokenStorage == 'memcached') {
+          $this->_memcached->set('sp_a_token', $this->_token, time() + $this->_tokenTTL);
+        } else {
+          file_put_contents($this->_tokenFile, $this->_token);
+        }
+      }
+      else {
+        throw new \Exception('Silverpop/Acoustic authenticate error');
+      }
+    }
+  }
+
+  /**
+   * Set the Oauth token from Silverpop/Acoustic
+   */
+    private function setToken() {
+
+      $fields = [];
+      $fields['grant_type'] = 'refresh_token';
+      $fields['client_id'] = $this->_clientId;
+      $fields['client_secret'] = $this->_clientSecret;
+      $fields['refresh_token'] = $this->_refreshToken;
+
+      $fields_string = http_build_query($fields);
+
+      //open connection
+      $ch = curl_init();
+      //set headers in array
+      $headers = array(
+        'Expect:',
+        'Content-Type: application/x-www-form-urlencoded; charset=utf-8',
+      );
+
+      //set the url, number of POST vars, POST data
+      curl_setopt($ch,CURLOPT_HTTPHEADER, $headers);
+      curl_setopt($ch,CURLOPT_URL,$this->_baseUrl . '/oauth/token');
+      curl_setopt($ch,CURLOPT_POST,count($fields));
+      curl_setopt($ch,CURLOPT_POSTFIELDS,$fields_string);
+      curl_setopt($ch,CURLOPT_RETURNTRANSFER,true);
+
+      //execute post
+      $result = json_decode(curl_exec($ch),true);
+      $this->_token   = isset($result['access_token']) ? $result['access_token'] : false;
+      $this->_tokenTTL = isset($result['expires_in']) ? ($result['expires_in'] - 600) : $this->_tokenTTL; //if set, subtract 10 minutes, else keep default
+      //close connection
+      curl_close($ch);
     }
 
     /**
@@ -153,7 +288,7 @@ class EngagePod {
         if ($this->_isSuccess($result)) {
             return $result;
         } else {
-            throw new Exception("Silverpop says: ".$response["Envelope"]["Body"]["Fault"]["FaultString"]);
+            throw new \Exception("Silverpop says: ".$response["Envelope"]["Body"]["Fault"]["FaultString"]);
         }
     }
 
@@ -891,29 +1026,27 @@ class EngagePod {
     }
 
     public function getRawResponse() {
-        return $this->_raw_responce;
+        return $this->_raw_response;
     }
 
     /**
      * Private method: authenticate with Silverpop
      *
      */
-    private function _login($username, $password) {
-        $data["Envelope"] = array(
-            "Body" => array(
-                "Login" => array(
-                    "USERNAME" => $username,
-                    "PASSWORD" => $password,
-                ),
-            ),
-        );
+    private function _login() {
+        $data["Envelope"] = [
+            "Body" => [
+                "Login" => [
+                    "USERNAME" => $this->_username,
+                    "PASSWORD" => $this->_password,
+                ],
+            ],
+        ];
         $response = $this->_request($data);
         $result = $response["Envelope"]["Body"]["RESULT"];
         if ($this->_isSuccess($result)) {
             $this->_jsessionid = $result['SESSIONID'];
             $this->_session_encoding = $result['SESSION_ENCODING'];
-            $this->_username = $username;
-            $this->_password = $password;
         } else {
             throw new \Exception("Login Error: ".$this->_getErrorFromResponse($response));
         }
@@ -924,15 +1057,20 @@ class EngagePod {
      *
      */
     private function _getFullUrl() {
-        return $this->_baseUrl . (isset($this->_session_encoding) ? $this->_session_encoding : '');
+        return $this->_xmlUrl . (isset($this->_session_encoding) ? $this->_session_encoding : '');
     }
 
-    /**
-     * Private method: make the request
-     *
-     */
-    private function _request($data, $replace = array(), $attribs = array()) {
-        $this->_raw_responce = NULL;
+  /**
+   * Private method: make the request
+   *
+   * @param $data
+   * @param $replace
+   * @param $attribs
+   * @return array|mixed|void
+   * @throws \Exception
+   */
+    private function _request($data, $replace = [], $attribs = []) {
+        $this->_raw_response = NULL;
 
         if (is_array($data))
         {
@@ -946,15 +1084,15 @@ class EngagePod {
             $xml = $data;
         }
 
-        $fields = array(
+        $fields = [
             "jsessionid" => isset($this->_jsessionid) ? $this->_jsessionid : '',
             "xml" => $xml,
-        );
+        ];
 
         $response = $this->_httpPost($fields);
 
         if ($response) {
-            $this->_raw_responce = $response;
+            $this->_raw_response = $response;
             $arr =  \Silverpop\Util\xml2array($response);
 
             if (isset($arr["Envelope"]["Body"]["RESULT"]["SUCCESS"])) {
@@ -967,19 +1105,28 @@ class EngagePod {
         }
     }
 
-    /**
-     * Private method: post the request to the url
-     *
-     */
+  /**
+   * Private method: post the request to the url
+   * @param $fields
+   * @return bool|string
+   */
     private function _httpPost($fields) {
         $fields_string = http_build_query($fields);
         //open connection
         $ch = curl_init();
-        //set headers in array
-        $headers = array(
-         'Expect:',
-         'Content-Type: application/x-www-form-urlencoded; charset=utf-8',
-        );
+
+        if ($this->_authType == 'oauth') {
+          $headers = [
+            'Content-Type: application/x-www-form-urlencoded; charset=utf-8',
+            'Authorization: Bearer ' . $this->_token
+          ];
+        } else {
+          $headers = [
+            'Expect:',
+            'Content-Type: application/x-www-form-urlencoded; charset=utf-8',
+          ];
+        }
+
         //set the url, number of POST vars, POST data
         curl_setopt($ch,CURLOPT_HTTPHEADER, $headers);
         curl_setopt($ch,CURLOPT_URL,$this->_getFullUrl());
@@ -993,7 +1140,30 @@ class EngagePod {
         //close connection
         curl_close($ch);
 
+        if (!$this->_tokenRetried && !$this->_isTokenExpired($result)) {
+          $this->_tokenRetried = true;
+          $this->getToken();
+          $this->_httpPost($fields);
+        }
+
         return $result;
+    }
+
+
+    /**
+     * Private method: parse an error response from Silverpop
+     *
+     */
+    private function _isTokenExpired($response) {
+
+      $tokenExpiredString = "The access token has expired.";
+
+      if (isset($response['Envelope']['Body']['Fault']['FaultString']) && !empty($response['Envelope']['Body']['Fault']['FaultString']) &&
+          $response['Envelope']['Body']['Fault']['FaultString'] == $tokenExpiredString) {
+        return true;
+      }
+
+      return false;
     }
 
     /**
@@ -1017,5 +1187,4 @@ class EngagePod {
         }
         return false;
     }
-
 }
